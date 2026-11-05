@@ -63,6 +63,15 @@ COLORS = {
     "p0": "#2c5f45", "p1": "#467f4f", "p2": "#6fa35a", "p3": "#9cc46a",
     # water lilies
     "fw": "#ffffff", "fl": "#fbe0e6", "fp": "#f2a7b8", "fr": "#e07595", "fy": "#f4cf5d",
+    # rowboat + fisherman
+    "wd0": "#3b2a26", "wd1": "#5e4034", "wd2": "#8a6046",
+    "hat": "#ecd38f", "hat2": "#c7a65e", "skin": "#e3ab86", "skin2": "#b97f62",
+    "shirt": "#f1eee6", "shirt2": "#c4c7d8", "pants": "#3e4f73", "float": "#d9483a",
+    # frog
+    "fg0": "#2c5426", "fg1": "#5b9440", "fg2": "#9fcf5c", "fgb": "#efe5a8",
+    "eye": "#16140f", "eyew": "#f3d96a",
+    # dragonfly
+    "df0": "#1d4f78", "df1": "#3fb6cf", "df2": "#9be3e8",
 }
 NAMES = list(COLORS)
 C = {name: i for i, name in enumerate(NAMES)}
@@ -225,11 +234,20 @@ def make_glints():
         x=int(rng.integers(0, W)), y=int(rng.integers(HORIZON + 1, H)),
         length=strokes(2, 4), phase=rng.uniform(0, 2 * math.pi),
         color=C[rng.choice(["w6", "w5", "sky3", "fl"])],
-    ) for _ in range(int(40 * AREA))]
+    ) for _ in range(int(18 * AREA))]
+
+
+# Where the characters live (pixel coordinates on the real canvas).
+BOAT_X, BOAT_Y = round(0.16 * W), HORIZON + round(10 * V)
+FROG_PAD = (round(0.70 * W), H - round(8.5 * V), 10 * U)  # cx, cy, rx
+KEEP_CLEAR = [  # (x0, y0, x1, y1) regions where no random lily pads are placed
+    (BOAT_X - 6, BOAT_Y - 4, BOAT_X + 52, BOAT_Y + 16),
+    (FROG_PAD[0] - 2 * FROG_PAD[2], FROG_PAD[1] - 10, FROG_PAD[0] + 2 * FROG_PAD[2], H),
+]
 
 
 def make_pads():
-    pads = []
+    pads = [Pad(FROG_PAD[0], FROG_PAD[1], FROG_PAD[2], FROG_PAD[2] * 0.38, 0.0, 0.6, None, 7)]
     for _ in range(round(10 * U)):
         ccx = rng.uniform(8 * U, W - 8 * U)
         ccy = HORIZON + 4 * V + (H - HORIZON - 6 * V) * rng.random() ** 0.7
@@ -237,6 +255,9 @@ def make_pads():
             cy = int(np.clip(ccy + rng.normal(0, 2.5 * V), HORIZON + 3 * V, H - 2))
             cx = int(np.clip(ccx + rng.normal(0, 11 * U), 2, W - 3))
             rx = (1.6 + (cy - HORIZON) / V * 0.23 * rng.uniform(0.8, 1.15)) * U
+            if any(x0 - rx < cx < x1 + rx and y0 - rx * 0.4 < cy < y1 + rx * 0.4
+                   for x0, y0, x1, y1 in KEEP_CLEAR):
+                continue
             flower = None
             if rx >= 3 * U and rng.random() < 0.45:
                 flower = "white" if rng.random() < 0.3 else "pink"
@@ -332,17 +353,18 @@ def make_willows():
                 phase=x0 / U * 0.09 + rng.normal(0, 0.25),
                 lean=(1 if side == 0 else -1) * rng.uniform(0, 0.05),
                 seed=int(rng.integers(1 << 30)),
+                sways=rng.random() < 0.25,  # only a few fronds move
             ))
     return canopy, strands
 
 
-def draw_strand(frame, s, t):
+def draw_strand(frame, s, t=None):
     pr = np.random.default_rng(s["seed"])
     shades = pr.choice([C["f3"], C["f4"], C["f5"], C["f6"], C["f2"]], size=s["length"] + 1)
     leaf_every = max(2, round(3 * V / 1.5))
     for y in range(s["length"] + 1):
         k = y / s["length"]
-        sway = 1.5 * U * k ** 1.6 * math.sin(t + s["phase"] - y / V * 0.05)
+        sway = 0.0 if t is None else 1.4 * U * k ** 1.8 * math.sin(t + s["phase"] - y / V * 0.05)
         x = int(round(s["x0"] + s["lean"] * y + sway))
         color = C["f6"] if y >= s["length"] - 1 else shades[y]
         if 0 <= x < W and y < H:
@@ -353,27 +375,141 @@ def draw_strand(frame, s, t):
                     frame[y, x + side] = shades[y]
 
 
-def draw_dragonfly(frame, t, f):
-    x = int(round(W * 0.62 + 12 * U * math.sin(t)))
-    y = int(round(HORIZON + 7 * V + 2 * V * math.sin(2 * t)))
-    facing = 1 if math.cos(t) > 0 else -1
-    body = ["f0", "f0", "b2", "w2", "b2", "w2", "b2"][: max(5, round(5 * U))]
-    for k, name in enumerate(body):
-        xx = x - facing * k
-        if 0 <= xx < W:
-            frame[y, xx] = C[name]
-    up = (f // 2) % 2 == 0  # wing beat every other frame
-    wing = C["w6"] if up else C["w5"]
-    for k in (1, 2, 3):
-        xx = x - facing * (k + 1)
-        if not (0 <= xx < W):
-            continue
-        if up:
-            frame[y - 1 - (k == 2), xx] = wing
-            frame[y - 1, xx] = wing
-        else:
-            frame[y - 1, xx] = wing
-            frame[y + 1, xx] = C["w5"]
+def blit(frame, sprite, x, y, cmap, flip=False):
+    for j, row in enumerate(sprite):
+        for i, ch in enumerate(row[::-1] if flip else row):
+            if ch != "." and 0 <= x + i < W and 0 <= y + j < H:
+                frame[y + j, x + i] = C[cmap[ch]]
+
+
+def line(frame, x0, y0, x1, y1, color):
+    n = max(abs(x1 - x0), abs(y1 - y0), 1)
+    for k in range(n + 1):
+        xx, yy = round(x0 + (x1 - x0) * k / n), round(y0 + (y1 - y0) * k / n)
+        if 0 <= xx < W and 0 <= yy < H:
+            frame[yy, xx] = color
+
+
+# ---- fisherman in a rowboat (static, except his float and line)
+
+FISHER = [
+    "......hHHh.....................",
+    "....HHHHHHHH...................",
+    ".....hssS......................",
+    "......sS.......................",
+    ".....wwwWW.....................",
+    "....wwwwWWss...................",
+    "....wwwwWW.....................",
+    "....pppppppp...................",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+    ".BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
+    "...DDDDDDDDDDDDDDDDDDDDDDDDD...",
+]
+FISHER_COLORS = {"H": "hat", "h": "hat2", "s": "skin", "S": "skin2", "w": "shirt", "W": "shirt2",
+                 "p": "pants", "b": "wd2", "B": "wd1", "D": "wd0"}
+HANDS = (BOAT_X + 11, BOAT_Y + 5)
+ROD_TIP = (HANDS[0] + round(15 * U), HANDS[1] - round(8 * V))
+FLOAT = (ROD_TIP[0] + 3, BOAT_Y + 9)
+RIPPLE_PERIOD = FRAMES // 2  # two nibbles per loop
+RIPPLE_LIFE = int(RIPPLE_PERIOD * 0.9)
+
+
+def paint_fisherman(scene):
+    # dark broken reflection of the hull
+    hull_y = BOAT_Y + len(FISHER)
+    for k in range(3):
+        for x in range(BOAT_X + 1 + 2 * k, BOAT_X + 28 - 2 * k):
+            if (x + k) % 2 == 0 and hull_y + k < H:
+                scene[hull_y + k, x] = C["w0"]
+    blit(scene, FISHER, BOAT_X, BOAT_Y, FISHER_COLORS)
+    line(scene, *HANDS, *ROD_TIP, C["wd0"])
+
+
+def draw_float(frame, f):
+    age = f % RIPPLE_PERIOD
+    for born in (0, 7):  # each nibble sends out two rings
+        a = age - born
+        if 0 <= a < RIPPLE_LIFE:
+            r = (1.2 + a * 0.12) * U
+            fade = a / RIPPLE_LIFE
+            for yy in range(int(FLOAT[1] - r * 0.4) - 1, int(FLOAT[1] + r * 0.4) + 2):
+                for xx in range(int(FLOAT[0] - r) - 1, int(FLOAT[0] + r) + 2):
+                    if not (0 <= xx < W and HORIZON <= yy < H):
+                        continue
+                    d = math.hypot((xx - FLOAT[0]) / r, (yy - FLOAT[1]) / (r * 0.4))
+                    if abs(d - 1) < 0.55 / r * U and (fade < 0.3 or (xx + yy) % 2 == 0):
+                        frame[yy, xx] = C["w4"] if fade < 0.5 else C["w3"]
+    dip = 1 if age < 4 else 0
+    fx, fy = FLOAT[0], FLOAT[1] + dip
+    line(frame, *ROD_TIP, fx, fy - 2, C["w5"])
+    frame[fy - 1, fx] = C["float"]
+    if not dip:
+        frame[fy, fx] = C["fw"]
+
+
+# ---- frog on a lily pad: blinks, croaks, and watches the dragonfly
+
+FROG_OPEN = [
+    "..GG...GG..",
+    ".GLRG.GLRG.",
+    ".GRRGgGRRG.",
+    "ggggggggggg",
+    "gGdddddddGg",
+    "dgyyyyyyygd",
+    "ddgyyyyygdd",
+    "gggdg.gdggg",
+]
+FROG_BLINK = ["..GG...GG..", ".GGGG.GGGG.", ".GddGgGddG."] + FROG_OPEN[3:]
+FROG_CROAK = FROG_OPEN[:6] + ["dyyyyyyyyyd", "ggyyyyyyygg"]
+
+
+def draw_frog(frame, f, look_left):
+    sprite = FROG_OPEN
+    if f % 45 in (20, 21, 22):
+        sprite = FROG_BLINK
+    if 56 <= f < 62 or 66 <= f < 72:
+        sprite = [*sprite[:6], *FROG_CROAK[6:]]
+    cmap = {"G": "fg2", "g": "fg1", "d": "fg0", "y": "fgb", "R": "eyew",
+            "L": "eye" if look_left else "eyew"}
+    if not look_left:  # pupil on the right-hand side of each eye
+        sprite = [row.replace("LR", "RL") for row in sprite]
+        cmap["L"] = "eye"
+    x = FROG_PAD[0] - len(FROG_OPEN[0]) // 2
+    y = FROG_PAD[1] - len(FROG_OPEN) + 1
+    blit(frame, sprite, x, y, cmap)
+
+
+# ---- dragonfly: hovers, then darts to the next spot
+
+HOVER = [(0.46 * W, 0.62 * H), (0.60 * W, 0.56 * H), (0.84 * W, 0.66 * H)]
+DRAGON_UP = ["......w..w...",
+             ".....ww.ww...",
+             "aAaAaAaAtTthh",
+             "............."]
+DRAGON_DOWN = [".............",
+               ".....wwwwww..",
+               "aAaAaAaAtTthh",
+               "......vvvv..."]
+DRAGON_COLORS = {"v": "w5", "w": "fw", "a": "df1", "A": "df0", "t": "df1", "T": "df2", "h": "df0"}
+
+
+def dragonfly_pos(f):
+    seg = FRAMES / len(HOVER)
+    i, local = int(f // seg), (f % seg) / seg
+    (x0, y0), (x1, y1) = HOVER[i], HOVER[(i + 1) % len(HOVER)]
+    hover = 0.7
+    if local < hover:
+        return x0, y0 + math.sin(local / hover * 2 * math.pi) * 1.2, x1 > x0
+    e = (local - hover) / (1 - hover)
+    e = e * e * (3 - 2 * e)  # smoothstep
+    return x0 + (x1 - x0) * e, y0 + (y1 - y0) * e - math.sin(e * math.pi) * 6 * V, x1 > x0
+
+
+def draw_dragonfly(frame, f):
+    x, y, facing_right = dragonfly_pos(f)
+    sprite = DRAGON_UP if f % 2 == 0 else DRAGON_DOWN
+    blit(frame, sprite, round(x) - 6, round(y) - 2, DRAGON_COLORS, flip=not facing_right)
+    return x
 
 
 # --------------------------------------------------------------------------- frames
@@ -386,41 +522,38 @@ def render():
     pads = make_pads()
     canopy, strands = make_willows()
 
+    # Everything that never moves is painted once into `scene`.
+    scene = bg.copy()
+    for y in range(HORIZON, H):
+        src = max(0, 2 * HORIZON - 1 - y)
+        dx = int(round(0.8 * U * math.sin(y / V * 0.9)))  # broken, painterly reflection
+        scene[y] = WATER_TINT[bg[src, np.clip(np.arange(W) + dx, 0, W - 1)]]
+        hit = tex[y] != EMPTY
+        scene[y, hit] = tex[y, hit]
+    for p in pads:
+        draw_pad(scene, p, 0)
+    paint_fisherman(scene)
+    hit = canopy != EMPTY
+    scene[hit] = canopy[hit]
+    for s in strands:
+        if not s["sways"]:
+            draw_strand(scene, s)
+
     frames = []
     for f in range(FRAMES):
         t = 2 * math.pi * f / FRAMES
-        frame = bg.copy()
-
-        # Reflection: mirror the scene above the horizon, wobble each row, tint blue.
-        for y in range(HORIZON, H):
-            d = (y - HORIZON) / (H - HORIZON)
-            src = max(0, 2 * HORIZON - 1 - y)
-            dx = int(round((0.3 + 0.9 * d) * U * math.sin(t + y / V * 0.7)))
-            cols = np.clip(np.arange(W) + dx, 0, W - 1)
-            frame[y] = WATER_TINT[bg[src, cols]]
-            # painterly horizontal strokes drifting gently back and forth
-            shift = int(round(1.2 * U * math.sin(t + y / V * 0.4)))
-            row = np.roll(tex[y], shift)
-            hit = row != EMPTY
-            frame[y, hit] = row[hit]
-
+        frame = scene.copy()
         for g in glints:
-            if math.sin(t + g["phase"]) > 0.6:
-                x = g["x"] + int(round(0.8 * U * math.sin(t + g["phase"])))
+            if math.sin(t + g["phase"]) > 0.75:
                 for k in range(g["length"]):
-                    if 0 <= x + k < W:
-                        frame[g["y"], x + k] = g["color"]
-
-        for p in pads:
-            draw_pad(frame, p, int(round(0.6 * U * math.sin(t + p.phase))))
-
-        draw_dragonfly(frame, t, f)
-
-        hit = canopy != EMPTY
-        frame[hit] = canopy[hit]
+                    if 0 <= g["x"] + k < W:
+                        frame[g["y"], g["x"] + k] = g["color"]
+        draw_float(frame, f)
+        dragon_x = draw_dragonfly(frame, f)
+        draw_frog(frame, f, look_left=dragon_x < FROG_PAD[0])
         for s in strands:
-            draw_strand(frame, s, t)
-
+            if s["sways"]:
+                draw_strand(frame, s, t)
         frames.append(frame)
     return frames
 
