@@ -31,7 +31,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--width", type=int, default=384)
 ap.add_argument("--height", type=int, default=150)
 ap.add_argument("--scale", type=int, default=4)
-ap.add_argument("--frames", type=int, default=90)
+ap.add_argument("--frames", type=int, default=132)
 ap.add_argument("--frame-ms", type=int, default=120)
 ap.add_argument("--seed", type=int, default=1899)  # the year Monet started the footbridge series
 args = ap.parse_args()
@@ -69,7 +69,7 @@ COLORS = {
     "shirt": "#f1eee6", "shirt2": "#c4c7d8", "pants": "#3e4f73", "float": "#d9483a",
     # frog
     "fg0": "#2c5426", "fg1": "#5b9440", "fg2": "#9fcf5c", "fgb": "#efe5a8",
-    "eye": "#16140f", "eyew": "#f3d96a",
+    "eye": "#16140f", "eyew": "#f3d96a", "tongue": "#e0607a",
     # dragonfly
     "df0": "#1d4f78", "df1": "#3fb6cf", "df2": "#9be3e8",
 }
@@ -238,16 +238,26 @@ def make_glints():
 
 
 # Where the characters live (pixel coordinates on the real canvas).
-BOAT_X, BOAT_Y = round(0.16 * W), HORIZON + round(10 * V)
-FROG_PAD = (round(0.70 * W), H - round(8.5 * V), 10 * U)  # cx, cy, rx
-KEEP_CLEAR = [  # (x0, y0, x1, y1) regions where no random lily pads are placed
-    (BOAT_X - 6, BOAT_Y - 4, BOAT_X + 52, BOAT_Y + 16),
-    (FROG_PAD[0] - 2 * FROG_PAD[2], FROG_PAD[1] - 10, FROG_PAD[0] + 2 * FROG_PAD[2], H),
+BOAT_X, BOAT_Y = round(0.07 * W), HORIZON + round(14 * V)
+FROG_PADS = [  # the frog hops between these
+    (round(0.66 * W), H - round(9 * V)),
+    (round(0.80 * W), H - round(15 * V)),
+    (round(0.90 * W), H - round(6 * V)),
+]
+
+
+def pad_rx(cy):
+    return (1.6 + (cy - HORIZON) / V * 0.23) * U * 1.1
+
+
+KEEP_CLEAR = [(BOAT_X - 6, BOAT_Y - 4, BOAT_X + 72, BOAT_Y + 26)] + [  # no random pads here
+    (cx - 1.6 * pad_rx(cy), cy - 8, cx + 1.6 * pad_rx(cy), cy + 8) for cx, cy in FROG_PADS
 ]
 
 
 def make_pads():
-    pads = [Pad(FROG_PAD[0], FROG_PAD[1], FROG_PAD[2], FROG_PAD[2] * 0.38, 0.0, 0.6, None, 7)]
+    pads = [Pad(cx, cy, pad_rx(cy), pad_rx(cy) * 0.38, 0.0, 0.6 + i, None, 7 + i)
+            for i, (cx, cy) in enumerate(FROG_PADS)]
     for _ in range(round(10 * U)):
         ccx = rng.uniform(8 * U, W - 8 * U)
         ccy = HORIZON + 4 * V + (H - HORIZON - 6 * V) * rng.random() ** 0.7
@@ -393,52 +403,63 @@ def line(frame, x0, y0, x1, y1, color):
 # ---- fisherman in a rowboat (static, except his float and line)
 
 FISHER = [
-    "......hHHh.....................",
-    "....HHHHHHHH...................",
-    ".....hssS......................",
-    "......sS.......................",
-    ".....wwwWW.....................",
-    "....wwwwWWss...................",
-    "....wwwwWW.....................",
-    "....pppppppp...................",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
-    ".BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
-    "...DDDDDDDDDDDDDDDDDDDDDDDDD...",
+    "..........hHHHh.................................",
+    ".........hHHHHHh................................",
+    "........nnnnnnnnn...............................",
+    "......HHHHHHHHHHHHH.............................",
+    ".......hhhhhhhhhhh..............................",
+    "..........kssS..................................",
+    "..........ksSS..................................",
+    "...........SS...................................",
+    ".........wwwwwW.................................",
+    "........wwwwwwWW................................",
+    "........wwwwwWWWssss............................",
+    "........wwwwwWWW...ss...........................",
+    "........wwwwwWWW..........................bb....",
+    "bb......ppppppppppppp....................bbbb...",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..",
+    ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB...",
+    "..BBBBDBBBBBBBBBDBBBBBBBBBBBBDBBBBBBBBBBBBBB....",
+    "....DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD.....",
 ]
-FISHER_COLORS = {"H": "hat", "h": "hat2", "s": "skin", "S": "skin2", "w": "shirt", "W": "shirt2",
-                 "p": "pants", "b": "wd2", "B": "wd1", "D": "wd0"}
-HANDS = (BOAT_X + 11, BOAT_Y + 5)
-ROD_TIP = (HANDS[0] + round(15 * U), HANDS[1] - round(8 * V))
-FLOAT = (ROD_TIP[0] + 3, BOAT_Y + 9)
+FISHER_COLORS = {"H": "hat", "h": "hat2", "n": "w1", "k": "wd0", "s": "skin", "S": "skin2",
+                 "w": "shirt", "W": "shirt2", "p": "pants", "b": "wd2", "B": "wd1", "D": "wd0"}
+HANDS = (BOAT_X + 20, BOAT_Y + 11)
+ROD_TIP = (HANDS[0] + round(24 * U), HANDS[1] - round(14 * V))
+FLOAT = (ROD_TIP[0] + 4, BOAT_Y + len(FISHER) - 1)
 RIPPLE_PERIOD = FRAMES // 2  # two nibbles per loop
-RIPPLE_LIFE = int(RIPPLE_PERIOD * 0.9)
+
+
+def ring(frame, cx, cy, r, fade):
+    """Elliptical ripple outline that thins out as `fade` goes 0 -> 1."""
+    for yy in range(int(cy - r * 0.4) - 1, int(cy + r * 0.4) + 2):
+        for xx in range(int(cx - r) - 1, int(cx + r) + 2):
+            if not (0 <= xx < W and HORIZON <= yy < H):
+                continue
+            d = math.hypot((xx - cx) / r, (yy - cy) / (r * 0.4))
+            if abs(d - 1) < 0.55 / r * U and (fade < 0.3 or (xx + yy) % 2 == 0):
+                frame[yy, xx] = C["w4"] if fade < 0.5 else C["w3"]
 
 
 def paint_fisherman(scene):
-    # dark broken reflection of the hull
     hull_y = BOAT_Y + len(FISHER)
-    for k in range(3):
-        for x in range(BOAT_X + 1 + 2 * k, BOAT_X + 28 - 2 * k):
+    for k in range(3):  # dark broken reflection of the hull
+        for x in range(BOAT_X + 2 + 3 * k, BOAT_X + 44 - 3 * k):
             if (x + k) % 2 == 0 and hull_y + k < H:
                 scene[hull_y + k, x] = C["w0"]
+    line(scene, BOAT_X + 30, BOAT_Y + 13, BOAT_X + 40, hull_y + 3, C["wd1"])  # resting oar
     blit(scene, FISHER, BOAT_X, BOAT_Y, FISHER_COLORS)
     line(scene, *HANDS, *ROD_TIP, C["wd0"])
+    scene[ROD_TIP[1], ROD_TIP[0]] = C["wd2"]
 
 
 def draw_float(frame, f):
     age = f % RIPPLE_PERIOD
+    life = int(RIPPLE_PERIOD * 0.8)
     for born in (0, 7):  # each nibble sends out two rings
         a = age - born
-        if 0 <= a < RIPPLE_LIFE:
-            r = (1.2 + a * 0.12) * U
-            fade = a / RIPPLE_LIFE
-            for yy in range(int(FLOAT[1] - r * 0.4) - 1, int(FLOAT[1] + r * 0.4) + 2):
-                for xx in range(int(FLOAT[0] - r) - 1, int(FLOAT[0] + r) + 2):
-                    if not (0 <= xx < W and HORIZON <= yy < H):
-                        continue
-                    d = math.hypot((xx - FLOAT[0]) / r, (yy - FLOAT[1]) / (r * 0.4))
-                    if abs(d - 1) < 0.55 / r * U and (fade < 0.3 or (xx + yy) % 2 == 0):
-                        frame[yy, xx] = C["w4"] if fade < 0.5 else C["w3"]
+        if 0 <= a < life:
+            ring(frame, *FLOAT, (1.2 + a * 0.12) * U, a / life)
     dip = 1 if age < 4 else 0
     fx, fy = FLOAT[0], FLOAT[1] + dip
     line(frame, *ROD_TIP, fx, fy - 2, C["w5"])
@@ -447,7 +468,7 @@ def draw_float(frame, f):
         frame[fy, fx] = C["fw"]
 
 
-# ---- frog on a lily pad: blinks, croaks, and watches the dragonfly
+# ---- frog: hops between lily pads, eats a fly, blinks, croaks
 
 FROG_OPEN = [
     "..GG...GG..",
@@ -461,22 +482,103 @@ FROG_OPEN = [
 ]
 FROG_BLINK = ["..GG...GG..", ".GGGG.GGGG.", ".GddGgGddG."] + FROG_OPEN[3:]
 FROG_CROAK = FROG_OPEN[:6] + ["dyyyyyyyyyd", "ggyyyyyyygg"]
+FROG_JUMP = [
+    "..GG...GG..",
+    ".GLRG.GLRG.",
+    ".GRRGgGRRG.",
+    ".ggggggggg.",
+    "..gyyyyyg..",
+    "..dgyyygd..",
+    ".dd.ggg.dd.",
+    "dd.......dd",
+]
 
 
-def draw_frog(frame, f, look_left):
-    sprite = FROG_OPEN
-    if f % 45 in (20, 21, 22):
+def at(n):
+    """A moment in the loop, written for the default 132-frame loop."""
+    return round(n * FRAMES / 132)
+
+
+JUMP_LEN = max(4, at(8))
+JUMPS = [(at(24), 0, 1), (at(80), 1, 2), (at(112), 2, 0)]  # (start frame, from pad, to pad)
+BLINKS = [at(10), at(74), at(104)]
+CROAKS = [(at(96), at(102))]
+FLY_IN, CATCH = at(34), at(60)  # the fly arrives, then gets caught by the frog on pad 1
+
+
+def frog_at(f):
+    pad = 0
+    for start, a, b in JUMPS:
+        if f < start:
+            break
+        if f < start + JUMP_LEN:
+            e = (f - start + 1) / (JUMP_LEN + 1)
+            (x0, y0), (x1, y1) = FROG_PADS[a], FROG_PADS[b]
+            return x0 + (x1 - x0) * e, y0 + (y1 - y0) * e - math.sin(math.pi * e) * 12 * V, True
+        pad = b
+    return *FROG_PADS[pad], False
+
+
+def frog_mouth(cx, cy):
+    return round(cx), round(cy) - len(FROG_OPEN) + 5
+
+
+def fly_pos(f):
+    """Free-flying position of the fly (None when it is not around)."""
+    if not FLY_IN <= f < CATCH:
+        return None
+    mx, my = frog_mouth(*FROG_PADS[1])
+    e = min(1.0, (f - FLY_IN) / max(1, at(14)))
+    e = e * e * (3 - 2 * e)
+    x = mx - 13 * U + 45 * U * (1 - e) + 3 * U * math.sin(f * 1.9)
+    y = my - 9 * V - 28 * V * (1 - e) + 2 * V * math.sin(f * 2.7 + 1)
+    return x, y
+
+
+def draw_frog_and_fly(frame, f, dragon_x):
+    cx, cy, jumping = frog_at(f)
+    mouth = frog_mouth(cx, cy)
+
+    # ripples where the frog takes off and lands
+    for start, a, b in JUMPS:
+        for pad, age in ((a, f - start), (b, f - start - JUMP_LEN)):
+            if 0 <= age < 14:
+                px, py = FROG_PADS[pad]
+                ring(frame, px, py, pad_rx(py) + (1 + age * 0.45) * U, age / 14)
+
+    # the fly, and the tongue that catches it
+    fly = fly_pos(f)
+    tongue = {CATCH - 1: 0.5, CATCH: 1.0, CATCH + 1: 0.5}.get(f)
+    if tongue:
+        tx, ty = fly_pos(CATCH - 1)
+        tip = (round(mouth[0] + (tx - mouth[0]) * tongue), round(mouth[1] + (ty - mouth[1]) * tongue))
+        line(frame, *mouth, *tip, C["tongue"])
+        if f >= CATCH:
+            fly = tip  # caught: carried back on the tip of the tongue
+        elif fly:
+            fly = (tx, ty)
+    if fly and (f < CATCH + 1):
+        x, y = round(fly[0]), round(fly[1])
+        if 0 <= x < W - 2 and 2 <= y < H - 1:
+            frame[y, x:x + 3] = C["eye"]
+            frame[y + 1, x + 1] = C["eye"]
+            frame[y - 1, x + (f % 2)] = frame[y - 1 - (f % 2), x + 1 + (f % 2)] = C["fw"]  # buzzing wings
+
+    # pick the frog's pose
+    if jumping:
+        sprite = FROG_JUMP
+    elif CATCH + 2 <= f < CATCH + 9 or any(a <= f < b and (f - a) % 4 < 2 for a, b in CROAKS):
+        sprite = FROG_CROAK  # gulp / croak
+    elif any(b <= f < b + 3 for b in BLINKS):
         sprite = FROG_BLINK
-    if 56 <= f < 62 or 66 <= f < 72:
-        sprite = [*sprite[:6], *FROG_CROAK[6:]]
-    cmap = {"G": "fg2", "g": "fg1", "d": "fg0", "y": "fgb", "R": "eyew",
-            "L": "eye" if look_left else "eyew"}
-    if not look_left:  # pupil on the right-hand side of each eye
+    else:
+        sprite = FROG_OPEN
+
+    target_x = fly[0] if fly else dragon_x
+    cmap = {"G": "fg2", "g": "fg1", "d": "fg0", "y": "fgb", "R": "eyew", "L": "eye"}
+    if target_x > cx:  # pupils on the right-hand side of each eye
         sprite = [row.replace("LR", "RL") for row in sprite]
-        cmap["L"] = "eye"
-    x = FROG_PAD[0] - len(FROG_OPEN[0]) // 2
-    y = FROG_PAD[1] - len(FROG_OPEN) + 1
-    blit(frame, sprite, x, y, cmap)
+    blit(frame, sprite, round(cx) - len(FROG_OPEN[0]) // 2, round(cy) - len(FROG_OPEN) + 1, cmap)
 
 
 # ---- dragonfly: hovers, then darts to the next spot
@@ -550,7 +652,7 @@ def render():
                         frame[g["y"], g["x"] + k] = g["color"]
         draw_float(frame, f)
         dragon_x = draw_dragonfly(frame, f)
-        draw_frog(frame, f, look_left=dragon_x < FROG_PAD[0])
+        draw_frog_and_fly(frame, f, dragon_x)
         for s in strands:
             if s["sways"]:
                 draw_strand(frame, s, t)
