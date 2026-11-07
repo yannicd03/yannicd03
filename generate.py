@@ -11,6 +11,21 @@ the GIF is optimised so that pixels which do not change are not stored again.
 
     uv run generate.py                       # assets/monet-pond.gif + assets/preview.png
     uv run generate.py --width 240 --height 80 --scale 4
+
+Easter eggs (spoilers!):
+  1. A Game of Life glider sparkles across the water on a torus; it gets home
+     exactly when the GIF loops.
+  2. The fisherman's float dips "AI" in Morse code, twice per loop.
+  3. The dragonfly does gradient descent: every hover spot is lower than the
+     last with a decaying step size, then a random restart.
+  4. The frog's gaze is softmax attention over everything that moves.
+  5. The flock of birds is Reynolds' boids (separation, alignment, cohesion).
+  6. The bridge's railing posts spell "42" in 8-bit ASCII (light = 1, dark = 0).
+  7. There is a rubber duck on the pond, for debugging.
+  8. Only k-means centroids bloom: each flower sits on a pad placed at the
+     centroid of a cluster of lily pads.
+  9. There are exactly 42 lily pads.
+ 10. The frog's lunch is a bug, and it gets squashed.
 """
 
 import argparse
@@ -31,7 +46,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--width", type=int, default=384)
 ap.add_argument("--height", type=int, default=150)
 ap.add_argument("--scale", type=int, default=4)
-ap.add_argument("--frames", type=int, default=132)
+ap.add_argument("--frames", type=int, default=144)  # multiple of 16 (Game of Life)
 ap.add_argument("--frame-ms", type=int, default=120)
 ap.add_argument("--seed", type=int, default=1899)  # the year Monet started the footbridge series
 args = ap.parse_args()
@@ -41,6 +56,13 @@ FRAMES, FRAME_MS = args.frames, args.frame_ms
 U, V = W / REF_W, H / REF_H
 AREA = U * V
 HORIZON = round(H * 0.5)
+BRIDGE_MESSAGE = "42"
+N_PADS, N_CLUSTERS = 42, 12
+
+
+def at(n):
+    """A moment in the loop, written for a 132-frame loop and rescaled to FRAMES."""
+    return round(n * FRAMES / 132)
 OUT = Path(__file__).parent / "assets"
 
 COLORS = {
@@ -72,6 +94,8 @@ COLORS = {
     "eye": "#16140f", "eyew": "#f3d96a", "tongue": "#e0607a",
     # dragonfly
     "df0": "#1d4f78", "df1": "#3fb6cf", "df2": "#9be3e8",
+    # rubber duck
+    "duck": "#f5d54a", "duck2": "#cf9f2c", "beak": "#ea8a3a",
 }
 NAMES = list(COLORS)
 C = {name: i for i, name in enumerate(NAMES)}
@@ -175,6 +199,17 @@ def paint_bridge(bg):
     deck = max(3, round(3 * V))  # deck thickness in rows
     rail_top, rail_mid = round(6.5 * V), round(3.3 * V)
     post_every, post_w = round(9 * U), max(1, round(U))
+    # Easter egg: the railing posts spell BRIDGE_MESSAGE in 8-bit ASCII (light = 1, dark = 0).
+    bits = "".join(f"{ord(ch):08b}" for ch in BRIDGE_MESSAGE)
+    first = ((x1 - x0 - 3) // post_every + 1 - len(bits)) // 2
+    assert first >= 0, "bridge too short for the message"
+
+    def post_color(i):
+        j = i - first
+        if 0 <= j < len(bits):
+            return C["br3"] if bits[j] == "1" else C["br1"]
+        return C["br2"]
+
     for x in range(x0, x1 + 1):
         u = (x - x0) / (x1 - x0)
         yd = int(round(base - arch * math.sin(math.pi * u)))
@@ -191,10 +226,11 @@ def paint_bridge(bg):
         bg[yd - rail_top + 1, x] = C["br1"]
         bg[yd - rail_mid, x] = C["br1"]
         # posts
-        if (x - x0 - 3) % post_every < post_w:
+        k = x - x0 - 3
+        if k >= 0 and k % post_every < post_w:
             for y in range(yd - rail_top, yd):
-                bg[y, x] = C["br2"]
-        elif (x - x0 - 3) % post_every == post_w:
+                bg[y, x] = post_color(k // post_every)
+        elif k >= 0 and k % post_every == post_w:
             for y in range(yd - rail_top + 2, yd):
                 bg[y, x] = C["br0"]
 
@@ -250,14 +286,39 @@ def pad_rx(cy):
     return (1.6 + (cy - HORIZON) / V * 0.23) * U * 1.1
 
 
-KEEP_CLEAR = [(BOAT_X - 6, BOAT_Y - 4, BOAT_X + 72, BOAT_Y + 26)] + [  # no random pads here
-    (cx - 1.6 * pad_rx(cy), cy - 8, cx + 1.6 * pad_rx(cy), cy + 8) for cx, cy in FROG_PADS
-]
+DUCK = (round(0.45 * W), HORIZON + round(17 * V))
+LIFE_GEN_FRAMES = 4  # frames per Game of Life generation
+LIFE_N = FRAMES // (4 * LIFE_GEN_FRAMES)  # torus size, so the glider gets home once per loop
+LIFE_X, LIFE_Y = round(0.29 * W), HORIZON + round(4 * V)
+
+KEEP_CLEAR = [  # no random pads here
+    (BOAT_X - 6, BOAT_Y - 4, BOAT_X + 72, BOAT_Y + 26),
+    (DUCK[0] - 16, DUCK[1] - 10, DUCK[0] + 16, DUCK[1] + 10),
+    (LIFE_X - 4, LIFE_Y - 3, LIFE_X + 2 * LIFE_N + 4, LIFE_Y + 2 * LIFE_N + 3),
+] + [(cx - 1.6 * pad_rx(cy), cy - 8, cx + 1.6 * pad_rx(cy), cy + 8) for cx, cy in FROG_PADS]
+
+
+def in_keep_clear(cx, cy, rx):
+    return any(x0 - rx < cx < x1 + rx and y0 - rx * 0.4 < cy < y1 + rx * 0.4
+               for x0, y0, x1, y1 in KEEP_CLEAR)
+
+
+def kmeans(points, k, iters=100):
+    """Plain Lloyd's algorithm."""
+    cent = points[rng.choice(len(points), k, replace=False)].astype(float)
+    for _ in range(iters):
+        label = ((points[:, None, :] - cent[None]) ** 2).sum(-1).argmin(1)
+        new = np.array([points[label == j].mean(0) if (label == j).any() else cent[j] for j in range(k)])
+        if np.allclose(new, cent):
+            break
+        cent = new
+    return cent
 
 
 def make_pads():
     pads = [Pad(cx, cy, pad_rx(cy), pad_rx(cy) * 0.38, 0.0, 0.6 + i, None, 7 + i)
             for i, (cx, cy) in enumerate(FROG_PADS)]
+    candidates = []
     for _ in range(round(10 * U)):
         ccx = rng.uniform(8 * U, W - 8 * U)
         ccy = HORIZON + 4 * V + (H - HORIZON - 6 * V) * rng.random() ** 0.7
@@ -265,15 +326,23 @@ def make_pads():
             cy = int(np.clip(ccy + rng.normal(0, 2.5 * V), HORIZON + 3 * V, H - 2))
             cx = int(np.clip(ccx + rng.normal(0, 11 * U), 2, W - 3))
             rx = (1.6 + (cy - HORIZON) / V * 0.23 * rng.uniform(0.8, 1.15)) * U
-            if any(x0 - rx < cx < x1 + rx and y0 - rx * 0.4 < cy < y1 + rx * 0.4
-                   for x0, y0, x1, y1 in KEEP_CLEAR):
+            if in_keep_clear(cx, cy, rx):
                 continue
-            flower = None
-            if rx >= 3 * U and rng.random() < 0.45:
-                flower = "white" if rng.random() < 0.3 else "pink"
-            pads.append(Pad(cx, cy, rx, rx * 0.38, rng.uniform(0, 2 * math.pi),
-                            rng.uniform(0, 2 * math.pi), flower, int(rng.integers(1 << 30))))
-    pads.sort(key=lambda p: p.cy)
+            candidates.append(Pad(cx, cy, rx, rx * 0.38, 0.0, rng.uniform(0, 2 * math.pi),
+                                  None, int(rng.integers(1 << 30))))
+
+    # Easter egg: exactly N_PADS lily pads, and only the k-means centroids bloom.
+    n_plain = N_PADS - len(pads) - N_CLUSTERS
+    plain = [candidates[i] for i in sorted(rng.choice(len(candidates), n_plain, replace=False))]
+    centroids = kmeans(np.array([[q.cx, q.cy] for q in plain], float), N_CLUSTERS)
+    for cx, cy in np.round(centroids).astype(int):
+        rx = (1.6 + (cy - HORIZON) / V * 0.23) * U
+        flower = "white" if rng.random() < 0.3 else "pink"
+        plain.append(Pad(int(cx), int(cy), rx, rx * 0.38, 0.0, rng.uniform(0, 2 * math.pi),
+                         flower, int(rng.integers(1 << 30))))
+    pads += plain
+    assert len(pads) == N_PADS
+    pads.sort(key=lambda q: q.cy)
     return pads
 
 
@@ -427,7 +496,36 @@ FISHER_COLORS = {"H": "hat", "h": "hat2", "n": "w1", "k": "wd0", "s": "skin", "S
 HANDS = (BOAT_X + 20, BOAT_Y + 11)
 ROD_TIP = (HANDS[0] + round(24 * U), HANDS[1] - round(14 * V))
 FLOAT = (ROD_TIP[0] + 4, BOAT_Y + len(FISHER) - 1)
-RIPPLE_PERIOD = FRAMES // 2  # two nibbles per loop
+# Easter egg: the float dips MORSE_WORD in Morse code (dot = 1 unit, dash = 3).
+MORSE = {"A": ".-", "I": ".."}
+MORSE_WORD, MORSE_UNIT = "AI", 3  # frames per Morse unit
+
+
+def _morse_units(word):
+    units = []
+    for li, ch in enumerate(word):
+        for si, sym in enumerate(MORSE[ch]):
+            units += [True] * (1 if sym == "." else 3)
+            if si < len(MORSE[ch]) - 1:
+                units.append(False)  # gap inside a letter
+        if li < len(word) - 1:
+            units += [False] * 3  # gap between letters
+    return units
+
+
+MORSE_UNITS = _morse_units(MORSE_WORD)
+MORSE_STARTS = (at(6), at(78))
+
+
+def float_down(f):
+    for start in MORSE_STARTS:
+        u = (f - start) // MORSE_UNIT
+        if f >= start and u < len(MORSE_UNITS):
+            return MORSE_UNITS[u]
+    return False
+
+
+DIP_ONSETS = [f for f in range(FRAMES) if float_down(f) and not float_down(f - 1)]
 
 
 def ring(frame, cx, cy, r, fade):
@@ -454,13 +552,12 @@ def paint_fisherman(scene):
 
 
 def draw_float(frame, f):
-    age = f % RIPPLE_PERIOD
-    life = int(RIPPLE_PERIOD * 0.8)
-    for born in (0, 7):  # each nibble sends out two rings
-        a = age - born
-        if 0 <= a < life:
+    life = 26
+    for born in DIP_ONSETS:  # every dip sends out a ring
+        a = (f - born) % FRAMES
+        if a < life:
             ring(frame, *FLOAT, (1.2 + a * 0.12) * U, a / life)
-    dip = 1 if age < 4 else 0
+    dip = 1 if float_down(f) else 0
     fx, fy = FLOAT[0], FLOAT[1] + dip
     line(frame, *ROD_TIP, fx, fy - 2, C["w5"])
     frame[fy - 1, fx] = C["float"]
@@ -494,16 +591,11 @@ FROG_JUMP = [
 ]
 
 
-def at(n):
-    """A moment in the loop, written for the default 132-frame loop."""
-    return round(n * FRAMES / 132)
-
-
 JUMP_LEN = max(4, at(8))
 JUMPS = [(at(24), 0, 1), (at(80), 1, 2), (at(112), 2, 0)]  # (start frame, from pad, to pad)
 BLINKS = [at(10), at(74), at(104)]
 CROAKS = [(at(96), at(102))]
-FLY_IN, CATCH = at(34), at(60)  # the fly arrives, then gets caught by the frog on pad 1
+BUG_IN, CATCH = at(34), at(60)  # a bug flies in, then the frog on pad 1 squashes it
 
 
 def frog_at(f):
@@ -523,19 +615,46 @@ def frog_mouth(cx, cy):
     return round(cx), round(cy) - len(FROG_OPEN) + 5
 
 
-def fly_pos(f):
-    """Free-flying position of the fly (None when it is not around)."""
-    if not FLY_IN <= f < CATCH:
+def bug_pos(f):
+    """Free-flying position of the bug (None when it is not around)."""
+    if not BUG_IN <= f < CATCH:
         return None
     mx, my = frog_mouth(*FROG_PADS[1])
-    e = min(1.0, (f - FLY_IN) / max(1, at(14)))
+    e = min(1.0, (f - BUG_IN) / max(1, at(14)))
     e = e * e * (3 - 2 * e)
     x = mx - 13 * U + 45 * U * (1 - e) + 3 * U * math.sin(f * 1.9)
     y = my - 9 * V - 28 * V * (1 - e) + 2 * V * math.sin(f * 2.7 + 1)
     return x, y
 
 
-def draw_frog_and_fly(frame, f, dragon_x):
+def attend(query, keys, temperature=15 * U):
+    """Easter egg: the frog's gaze is softmax attention. Scores are negative distances
+    from the frog (query) to everything that moves (keys); it looks at the weighted mean."""
+    d = np.array([math.hypot(kx - query[0], ky - query[1]) for kx, ky in keys])
+    w = np.exp(-(d - d.min()) / temperature)
+    w /= w.sum()
+    return float(w @ np.array([kx for kx, _ in keys]))
+
+
+def squash_bug(frame, f, mouth):
+    """Draw the bug and, around CATCH, the tongue that fixes it. Returns the bug position."""
+    bug = bug_pos(f)
+    tongue = {CATCH - 1: 0.5, CATCH: 1.0, CATCH + 1: 0.5}.get(f)
+    if tongue:
+        tx, ty = bug_pos(CATCH - 1)
+        tip = (round(mouth[0] + (tx - mouth[0]) * tongue), round(mouth[1] + (ty - mouth[1]) * tongue))
+        line(frame, *mouth, *tip, C["tongue"])
+        bug = tip if f >= CATCH else (tx, ty)  # caught: carried back on the tongue
+    if bug and f < CATCH + 1:
+        x, y = round(bug[0]), round(bug[1])
+        if 0 <= x < W - 2 and 2 <= y < H - 1:
+            frame[y, x:x + 3] = C["eye"]
+            frame[y + 1, x + 1] = C["eye"]
+            frame[y - 1, x + (f % 2)] = frame[y - 1 - (f % 2), x + 1 + (f % 2)] = C["fw"]  # buzzing wings
+    return bug
+
+
+def draw_frog_and_bug(frame, f, dragonfly):
     cx, cy, jumping = frog_at(f)
     mouth = frog_mouth(cx, cy)
 
@@ -546,23 +665,7 @@ def draw_frog_and_fly(frame, f, dragon_x):
                 px, py = FROG_PADS[pad]
                 ring(frame, px, py, pad_rx(py) + (1 + age * 0.45) * U, age / 14)
 
-    # the fly, and the tongue that catches it
-    fly = fly_pos(f)
-    tongue = {CATCH - 1: 0.5, CATCH: 1.0, CATCH + 1: 0.5}.get(f)
-    if tongue:
-        tx, ty = fly_pos(CATCH - 1)
-        tip = (round(mouth[0] + (tx - mouth[0]) * tongue), round(mouth[1] + (ty - mouth[1]) * tongue))
-        line(frame, *mouth, *tip, C["tongue"])
-        if f >= CATCH:
-            fly = tip  # caught: carried back on the tip of the tongue
-        elif fly:
-            fly = (tx, ty)
-    if fly and (f < CATCH + 1):
-        x, y = round(fly[0]), round(fly[1])
-        if 0 <= x < W - 2 and 2 <= y < H - 1:
-            frame[y, x:x + 3] = C["eye"]
-            frame[y + 1, x + 1] = C["eye"]
-            frame[y - 1, x + (f % 2)] = frame[y - 1 - (f % 2), x + 1 + (f % 2)] = C["fw"]  # buzzing wings
+    bug = squash_bug(frame, f, mouth)
 
     # pick the frog's pose
     if jumping:
@@ -574,7 +677,7 @@ def draw_frog_and_fly(frame, f, dragon_x):
     else:
         sprite = FROG_OPEN
 
-    target_x = fly[0] if fly else dragon_x
+    target_x = attend((cx, cy - 4), [dragonfly] + ([bug] if bug else []))
     cmap = {"G": "fg2", "g": "fg1", "d": "fg0", "y": "fgb", "R": "eyew", "L": "eye"}
     if target_x > cx:  # pupils on the right-hand side of each eye
         sprite = [row.replace("LR", "RL") for row in sprite]
@@ -583,7 +686,9 @@ def draw_frog_and_fly(frame, f, dragon_x):
 
 # ---- dragonfly: hovers, then darts to the next spot
 
-HOVER = [(0.46 * W, 0.62 * H), (0.60 * W, 0.56 * H), (0.84 * W, 0.66 * H)]
+# Easter egg: gradient descent. Every hover spot is lower than the last and the steps
+# shrink (a decaying learning rate) until it settles in a minimum; then a random restart.
+HOVER = [(0.40 * W, 0.50 * H), (0.56 * W, 0.58 * H), (0.64 * W, 0.62 * H), (0.68 * W, 0.64 * H)]
 DRAGON_UP = ["......w..w...",
              ".....ww.ww...",
              "aAaAaAaAtTthh",
@@ -611,7 +716,7 @@ def draw_dragonfly(frame, f):
     x, y, facing_right = dragonfly_pos(f)
     sprite = DRAGON_UP if f % 2 == 0 else DRAGON_DOWN
     blit(frame, sprite, round(x) - 6, round(y) - 2, DRAGON_COLORS, flip=not facing_right)
-    return x
+    return x, y
 
 
 # ---- birds: a small flock crossing the sky, two distant ones going the other way
@@ -626,7 +731,35 @@ FLOCK = [  # (dx, dy, flap phase) relative to the leader, in a loose V
 ]
 
 
-def draw_birds(frame, f, occluded):
+def simulate_boids():
+    """Easter egg: the flock is Reynolds' boids (separation, alignment, cohesion), simulated
+    in the flock's own frame of reference. The second lap is bent slightly so the loop closes."""
+    r = np.random.default_rng(args.seed + 7)
+    pos = np.array([[dx * U, dy * V * 0.6] for dx, dy, _ in FLOCK], float)
+    vel = np.zeros_like(pos)
+    track = []
+    for _ in range(2 * FRAMES + 1):
+        acc = np.zeros_like(pos)
+        for i in range(len(pos)):
+            d = pos - pos[i]
+            dist = np.hypot(d[:, 0], d[:, 1])
+            others = dist > 0
+            close = others & (dist < 7 * U)
+            if close.any():
+                acc[i] -= (d[close] / dist[close, None] ** 2).sum(0) * 0.8  # separation
+            acc[i] += (vel[others].mean(0) - vel[i]) * 0.05  # alignment
+            acc[i] += (pos[others].mean(0) - pos[i]) * 0.002  # cohesion
+        acc += r.normal(0, 0.03, pos.shape)  # a little wind
+        acc -= pos.mean(0) * 0.02  # stay centred on the flight path
+        vel = (vel + acc) * 0.9
+        pos = pos + vel
+        track.append(pos.copy())
+    lap = np.array(track[FRAMES:])
+    k = np.arange(FRAMES)[:, None, None] / FRAMES
+    return lap[:FRAMES] + (lap[0] - lap[FRAMES]) * k
+
+
+def draw_birds(frame, f, occluded, flock):
     t = 2 * math.pi * f / FRAMES
     span = W + 60
 
@@ -639,14 +772,65 @@ def draw_birds(frame, f, occluded):
 
     lead_x = (f / FRAMES) * span - 20  # one crossing per loop, left -> right
     lead_y = 0.13 * H
-    for dx, dy, ph in FLOCK:
-        x = round(lead_x + dx * U)
-        y = round(lead_y + dy * V * 0.6 + math.sin(t * 3 + ph) * 0.8)
+    for (dx, dy), (_, _, ph) in zip(flock[f], FLOCK):
+        x = round(lead_x + dx)
+        y = round(lead_y + dy)
         put(BIRD[FLAP[(f // 2 + ph) % 4]], x, y, C["b0"])
     for k, (dx, dy) in enumerate(((0, 0), (-6, 2))):  # far pair, right -> left
         x = round(W + 20 - ((f / FRAMES + 0.5) % 1) * span + dx * U)
         y = round(0.07 * H + dy + math.sin(t * 2 + k) * 0.6)
         put(BIRD_FAR[FLAP[(f // 2 + k) % 4]], x, y, C["v0"])
+
+
+# ---- Game of Life glider sparkling on the water
+
+GLIDER = [(0, 1), (1, 2), (2, 0), (2, 1), (2, 2)]  # (row, col)
+
+
+def life_generations():
+    """Easter egg: a glider on an LIFE_N x LIFE_N torus moves one cell diagonally every
+    4 generations, so with one generation per LIFE_GEN_FRAMES it gets home as the GIF loops."""
+    assert FRAMES % (4 * LIFE_GEN_FRAMES) == 0, "--frames must be a multiple of 16 for the glider"
+    g = np.zeros((LIFE_N, LIFE_N), bool)
+    for r_, c_ in GLIDER:
+        g[r_ + 1, c_ + 1] = True
+    gens = []
+    for _ in range(FRAMES // LIFE_GEN_FRAMES):
+        gens.append(g)
+        n = sum(np.roll(np.roll(g, dy, 0), dx, 1).astype(int)
+                for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0))
+        g = (n == 3) | (g & (n == 2))
+    assert (g == gens[0]).all()
+    return gens
+
+
+def draw_life(frame, gen):
+    for r_, c_ in np.argwhere(gen):  # 2 x 2 px cells, lit like a sun glint
+        x, y = LIFE_X + 2 * c_, LIFE_Y + 2 * r_
+        frame[y, x:x + 2] = C["w6"]
+        frame[y + 1, x:x + 2] = C["w5"]
+
+
+# ---- rubber duck, for debugging
+
+DUCK_SPRITE = [
+    "..YY.....",
+    ".YkYY....",
+    "oYYYY....",
+    "..YYY..Y.",
+    ".YYYYYYY.",
+    "..ddddd..",
+]
+DUCK_COLORS = {"Y": "duck", "d": "duck2", "o": "beak", "k": "eye"}
+
+
+def draw_duck(frame, t):
+    x, y = DUCK
+    bob = round(0.55 * math.sin(2 * t))
+    for i in range(-3, 4):  # reflection
+        if (i + bob) % 2 == 0:
+            frame[y + 2, x + i] = C["duck2"]
+    blit(frame, DUCK_SPRITE, x - 4, y - 4 + bob, DUCK_COLORS)
 
 
 # --------------------------------------------------------------------------- frames
@@ -677,6 +861,9 @@ def render():
     occluded = willow != EMPTY
     scene[occluded] = willow[occluded]
 
+    flock = simulate_boids()
+    life = life_generations()
+
     frames = []
     for f in range(FRAMES):
         t = 2 * math.pi * f / FRAMES
@@ -686,10 +873,12 @@ def render():
                 for k in range(g["length"]):
                     if 0 <= g["x"] + k < W:
                         frame[g["y"], g["x"] + k] = g["color"]
-        draw_birds(frame, f, occluded)
+        draw_life(frame, life[f // LIFE_GEN_FRAMES])
+        draw_duck(frame, t)
+        draw_birds(frame, f, occluded, flock)
         draw_float(frame, f)
-        dragon_x = draw_dragonfly(frame, f)
-        draw_frog_and_fly(frame, f, dragon_x)
+        dragonfly = draw_dragonfly(frame, f)
+        draw_frog_and_bug(frame, f, dragonfly)
         for s in strands:
             if s["sways"]:
                 draw_strand(frame, s, t)
