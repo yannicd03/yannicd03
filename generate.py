@@ -614,6 +614,41 @@ def draw_dragonfly(frame, f):
     return x
 
 
+# ---- birds: a small flock crossing the sky, two distant ones going the other way
+
+BIRD = [["x...x", ".x.x.", "..x.."],   # wings up
+        [".....", "xx.xx", "..x.."],   # level
+        [".....", "..x..", ".x.x."]]   # wings down
+BIRD_FAR = [["x.x", ".x."], ["...", "xxx"], ["...", ".x."]]
+FLAP = [0, 1, 2, 1]
+FLOCK = [  # (dx, dy, flap phase) relative to the leader, in a loose V
+    (0, 0, 0), (-9, -3, 1), (-9, 4, 3), (-18, -6, 2), (-19, 7, 0),
+]
+
+
+def draw_birds(frame, f, occluded):
+    t = 2 * math.pi * f / FRAMES
+    span = W + 60
+
+    def put(sprite, x, y, color):
+        for j, row in enumerate(sprite):
+            for i, ch in enumerate(row):
+                xx, yy = x + i, y + j
+                if ch == "x" and 0 <= xx < W and 0 <= yy < H and not occluded[yy, xx]:
+                    frame[yy, xx] = color
+
+    lead_x = (f / FRAMES) * span - 20  # one crossing per loop, left -> right
+    lead_y = 0.13 * H
+    for dx, dy, ph in FLOCK:
+        x = round(lead_x + dx * U)
+        y = round(lead_y + dy * V * 0.6 + math.sin(t * 3 + ph) * 0.8)
+        put(BIRD[FLAP[(f // 2 + ph) % 4]], x, y, C["b0"])
+    for k, (dx, dy) in enumerate(((0, 0), (-6, 2))):  # far pair, right -> left
+        x = round(W + 20 - ((f / FRAMES + 0.5) % 1) * span + dx * U)
+        y = round(0.07 * H + dy + math.sin(t * 2 + k) * 0.6)
+        put(BIRD_FAR[FLAP[(f // 2 + k) % 4]], x, y, C["v0"])
+
+
 # --------------------------------------------------------------------------- frames
 
 def render():
@@ -635,11 +670,12 @@ def render():
     for p in pads:
         draw_pad(scene, p, 0)
     paint_fisherman(scene)
-    hit = canopy != EMPTY
-    scene[hit] = canopy[hit]
+    willow = canopy.copy()  # static willow layer, also used to hide birds behind it
     for s in strands:
         if not s["sways"]:
-            draw_strand(scene, s)
+            draw_strand(willow, s)
+    occluded = willow != EMPTY
+    scene[occluded] = willow[occluded]
 
     frames = []
     for f in range(FRAMES):
@@ -650,6 +686,7 @@ def render():
                 for k in range(g["length"]):
                     if 0 <= g["x"] + k < W:
                         frame[g["y"], g["x"] + k] = g["color"]
+        draw_birds(frame, f, occluded)
         draw_float(frame, f)
         dragon_x = draw_dragonfly(frame, f)
         draw_frog_and_fly(frame, f, dragon_x)
